@@ -13,6 +13,7 @@ import struct
 import socket
 import asyncio
 import time
+import wiringpi as wp
 from tornado.iostream import IOStream
 from tornado.httpclient import AsyncHTTPClient
 from tornado.escape import json_decode
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
 
 class PrinterPower:
     def __init__(self, config: ConfigHelper) -> None:
+        wp.wiringPiSetupGpio()
         self.server = config.get_server()
         if not HAS_GPIOD:
             self.server.add_warning(
@@ -74,7 +76,8 @@ class PrinterPower:
             "homeseer": HomeSeer,
             "homeassistant": HomeAssistant,
             "loxonev1": Loxonev1,
-            "rf": RFDevice
+            "rf": RFDevice,
+            "printer": Printer,
         }
         try:
             for section in prefix_sections:
@@ -937,6 +940,39 @@ class Loxonev1(HTTPDevice):
         res = await self._send_loxonev1_command(state)
         state = res[f"LL"][f"value"]
         return "on" if int(state) == 1 else "off"
+
+class Printer(PowerDevice):
+    power_pin = 23
+    tx_pin = 14
+    rx_pin = 15
+
+    alt0 = 0b100
+
+    def initialize(self):
+        super().initialize()
+        wp.pinMode(self.power_pin, wp.OUTPUT)
+        self.set_power("off")
+
+    def refresh_status(self):
+        pass
+
+    def set_power(self, state: str):
+        try:
+            if state == "on":
+                wp.digitalWrite(self.power_pin, 1)
+                wp.pinModeAlt(self.tx_pin, self.alt0)
+                wp.pinModeAlt(self.rx_pin, self.alt0)
+            else:
+                wp.pinMode(self.tx_pin, wp.INPUT)
+                wp.pinMode(self.rx_pin, wp.INPUT)
+                wp.digitalWrite(self.power_pin, 0)
+            self.state = state
+        except:
+            self.state = "error"
+
+
+    def close(self) -> None:
+        self.set_power("off")
 
 
 # The power component has multiple configuration sections
